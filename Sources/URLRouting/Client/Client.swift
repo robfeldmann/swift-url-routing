@@ -10,7 +10,7 @@ import XCTestDynamicOverlay
 /// model.
 ///
 /// You do not typically construct this type directly from its initializer, and instead use the
-/// ``live(router:session:)`` static method for creating an API client from a parser-printer, or use
+/// ``live(router:session:decoder:middlewares:)`` static method for creating an API client from a parser-printer, or use
 /// the ``failing`` static variable for creating an API client that throws an error when a request
 /// is made and then use ``override(_:with:)-11tzf`` to override certain routes with mocked
 /// responses.
@@ -75,43 +75,62 @@ extension URLRoutingClient {
   ///   - decoder: A JSON decoder.
   /// - Returns: A live API client that makes requests through a URL session.
   @available(macOS 10.15, iOS 13, watchOS 6, tvOS 13, *)
-  public static func live<R: ParserPrinter>(
+  public static func live<R: ParserPrinter, Middleware: URLRoutingClientMiddleware>(
     router: R,
     session: URLSession = .shared,
-    decoder: JSONDecoder = .init()
+    decoder: JSONDecoder = .init(),
+    middlewares: [Middleware] = []
   ) -> Self
-  where R.Input == URLRequestData, R.Output == Route {
-    Self.init(
+  where R.Input == URLRequestData, R.Output == Route, Middleware.Route == Route {
+    return Self.init(
       request: { route in
-        let request = try router.request(for: route)
-
-        #if os(macOS) || os(iOS) || os(tvOS) || os(watchOS)
-          if #available(macOS 12, iOS 15, tvOS 15, watchOS 8, *) {
-            return try await session.data(for: request)
+        var next: (URLRequestData, Route) async throws -> (Data, URLResponse) = { (_data, _route) in
+          guard let request = URLRequest(data: _data) else {
+            throw RoutingError()
           }
-        #endif
-        var dataTask: URLSessionDataTask?
-        let cancel: () -> Void = { dataTask?.cancel() }
-
-        return try await withTaskCancellationHandler(
-          operation: {
-            try await withCheckedThrowingContinuation { continuation in
-              dataTask = session.dataTask(with: request) { data, response, error in
-                guard
-                  let data = data,
-                  let response = response
-                else {
-                  continuation.resume(throwing: error ?? URLError(.badServerResponse))
-                  return
-                }
-
-                continuation.resume(returning: (data, response))
-              }
-              dataTask?.resume()
+          
+          #if os(macOS) || os(iOS) || os(tvOS) || os(watchOS)
+            if #available(macOS 12, iOS 15, tvOS 15, watchOS 8, *) {
+              return try await session.data(for: request)
             }
-          },
-          onCancel: { cancel() }
-        )
+          #endif
+          var dataTask: URLSessionDataTask?
+          let cancel: () -> Void = { dataTask?.cancel() }
+          
+          return try await withTaskCancellationHandler(
+            operation: {
+              try await withCheckedThrowingContinuation { continuation in
+                dataTask = session.dataTask(with: request) { data, response, error in
+                  guard
+                    let data = data,
+                    let response = response
+                  else {
+                    continuation.resume(throwing: error ?? URLError(.badServerResponse))
+                    return
+                  }
+                  
+                  continuation.resume(returning: (data, response))
+                }
+                dataTask?.resume()
+              }
+            },
+            onCancel: { cancel() }
+          )
+        }
+        
+        for middleware in middlewares.reversed() {
+          let tmp = next
+          next = {
+            try await middleware.intercept(
+              $0,
+              route: $1,
+              next: tmp
+            )
+          }
+        }
+        
+        let requestData = try router.print(route)
+        return try await next(requestData, route)
       },
       decoder: decoder
     )
