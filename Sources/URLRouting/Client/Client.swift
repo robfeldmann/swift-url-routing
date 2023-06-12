@@ -12,7 +12,7 @@ import XCTestDynamicOverlay
 /// You do not typically construct this type directly from its initializer, and instead use the
 /// ``live(router:session:)`` static method for creating an API client from a parser-printer, or use
 /// the ``failing`` static variable for creating an API client that throws an error when a request
-/// is made and then use ``override(_:with:)-1ot4o`` to override certain routes with mocked
+/// is made and then use ``override(_:with:)-11tzf`` to override certain routes with mocked
 /// responses.
 public struct URLRoutingClient<Route> {
   var request: (Route) async throws -> (Data, URLResponse)
@@ -72,6 +72,7 @@ extension URLRoutingClient {
   /// - Parameters:
   ///   - router: A router.
   ///   - session: A URL session.
+  ///   - decoder: A JSON decoder.
   /// - Returns: A live API client that makes requests through a URL session.
   @available(macOS 10.15, iOS 13, watchOS 6, tvOS 13, *)
   public static func live<R: ParserPrinter>(
@@ -118,11 +119,11 @@ extension URLRoutingClient {
 }
 
 extension URLRoutingClient {
-  /// An ``APIClient`` that immediately throws an error when a request is made.
+  /// A ``URLRoutingClient`` that immediately throws an error when a request is made.
   ///
   /// This client is useful when testing a feature that uses only a small subset of the available
   /// routes in the API client. You can creating a failing API client, and then
-  /// ``override(_:with:)-1ot4o`` certain routes that return mocked data.
+  /// ``override(_:with:)-11tzf`` certain routes that return mocked data.
   public static var failing: Self {
     Self {
       let message = """
