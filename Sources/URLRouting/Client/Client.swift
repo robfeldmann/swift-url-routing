@@ -10,7 +10,7 @@ import XCTestDynamicOverlay
 /// model.
 ///
 /// You do not typically construct this type directly from its initializer, and instead use the
-/// ``live(router:session:decoder:middlewares:)`` static method for creating an API client from a parser-printer, or use
+/// ``live(router:session:decoder:middleware:)`` static method for creating an API client from a parser-printer, or use
 /// the ``failing`` static variable for creating an API client that throws an error when a request
 /// is made and then use ``override(_:with:)-11tzf`` to override certain routes with mocked
 /// responses.
@@ -64,6 +64,29 @@ public struct URLRoutingDecodingError: Error {
 }
 
 extension URLRoutingClient {
+
+	/// Constructs a "live" API client that makes a request to a server using a `URLSession`.
+	///
+	/// This client makes live requests by using the router to turn routes into URL requests,
+	/// and then using `URLSession` to make the request.
+	///
+	/// - Parameters:
+	///   - router: A router.
+	///   - session: A URL session.
+	///   - decoder: A JSON decoder.
+	///   - middleware: An array of client middleware.
+	/// - Returns: A live API client that makes requests through a URL session.
+	@available(macOS 13, iOS 16, watchOS 9, tvOS 16, *)
+	public static func live(
+		router: any ParserPrinter<URLRequestData, Route>,
+		session: URLSession = .shared,
+		decoder: JSONDecoder = .init(),
+		middleware: [any URLRoutingClientMiddleware<Route>] = []
+	) -> Self {
+		let erased = middleware.map { AnyURLRoutingClientMiddleware($0) }
+		return .live(router: router, session: session, decoder: decoder, middleware: erased)
+	}
+
   /// Constructs a "live" API client that makes a request to a server using a `URLSession`.
   ///
   /// This client makes live requests by using the router to turn routes into URL requests,
@@ -73,15 +96,16 @@ extension URLRoutingClient {
   ///   - router: A router.
   ///   - session: A URL session.
   ///   - decoder: A JSON decoder.
+	///   - middleware: An array of client middleware.
   /// - Returns: A live API client that makes requests through a URL session.
   @available(macOS 10.15, iOS 13, watchOS 6, tvOS 13, *)
-  public static func live<R: ParserPrinter, Middleware: URLRoutingClientMiddleware>(
+  public static func live<R: ParserPrinter>(
     router: R,
     session: URLSession = .shared,
     decoder: JSONDecoder = .init(),
-    middlewares: [Middleware] = []
+		middleware: [AnyURLRoutingClientMiddleware<Route>] = []
   ) -> Self
-  where R.Input == URLRequestData, R.Output == Route, Middleware.Route == Route {
+  where R.Input == URLRequestData, R.Output == Route {
     return Self.init(
       request: { route in
         var next: (URLRequestData, Route) async throws -> (Data, URLResponse) = { (_data, _route) in
@@ -118,7 +142,7 @@ extension URLRoutingClient {
           )
         }
         
-        for middleware in middlewares.reversed() {
+        for middleware in middleware.reversed() {
           let tmp = next
           next = {
             try await middleware.intercept(
